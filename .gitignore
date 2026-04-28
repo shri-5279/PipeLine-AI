@@ -1,0 +1,55 @@
+# -----------------------------------------------
+# PYTHON
+# -----------------------------------------------
+# __pycache__ is a folder Python creates automatically
+# when it compiles your .py files into faster bytecode
+# You never write this — Python generates it — so we don't track it
+__pycache__/
+
+# .pyc files are the compiled bytecode files inside __pycache__
+*.pyc
+*.pyo
+
+# .venv is your virtual environment folder
+# It contains thousands of files (installed libraries)
+# Anyone can recreate it from requirements.txt, so we never commit it
+.venv/
+venv/
+
+# -----------------------------------------------
+# ENVIRONMENT VARIABLES — MOST IMPORTANT
+# -----------------------------------------------
+# .env files contain secrets: API keys, database passwords, AWS credentials
+# If you commit this to a public GitHub repo, bots find it within MINUTES
+# and can rack up thousands of dollars on your AWS account
+# This is not an exaggeration — it happens constantly to beginners
+.env
+.env.local
+.env.*
+
+# -----------------------------------------------
+# AWS
+# -----------------------------------------------
+# Just in case — never commit AWS credentials
+.aws/
+
+# -----------------------------------------------
+# MACOS
+# -----------------------------------------------
+# macOS creates .DS_Store files in every folder to store
+# folder view settings (icon positions, etc.)
+# Completely useless to anyone else
+.DS_Store
+
+# -----------------------------------------------
+# PYTEST
+# -----------------------------------------------
+# pytest creates this folder to cache test results
+.pytest_cache/
+
+# -----------------------------------------------
+# IDE
+# -----------------------------------------------
+# VS Code settings that are personal to your machine
+.vscode/settings.json
+.idea/
