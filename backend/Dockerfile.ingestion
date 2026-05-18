@@ -1,0 +1,21 @@
+# Same base image as the API
+FROM python:3.11-slim
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Same pattern — copy requirements first for layer caching
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+# The ingestion service has no port to expose
+# It's a worker — it reaches OUT to SQS, not listening for incoming connections
+
+# Run the ingestion service as a Python module
+# '-m app.ingestion' = run the file backend/app/ingestion.py as a module
+# This is the same as running 'python -m app.ingestion' in your terminal
+CMD ["python", "-m", "app.ingestion"]

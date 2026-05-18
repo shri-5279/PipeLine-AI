@@ -1,0 +1,26 @@
+# Virtual environment — never copy this into the container
+# The container installs its own packages from requirements.txt
+.venv/
+venv/
+
+# Never copy secrets into a Docker image
+# Environment variables are passed in at runtime, not baked into the image
+.env
+
+# Python cache files — not needed in containers
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Git files — not needed inside the container
+.git/
+.gitignore
+
+# Test files — production container doesn't need tests
+tests/
+
+# Docker files themselves
+Dockerfile
+Dockerfile.ingestion
+docker-compose.yml
