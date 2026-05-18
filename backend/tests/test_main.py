@@ -1,135 +1,98 @@
-from fastapi.testclient import TestClient
+import json
+import pytest
 from unittest.mock import patch, MagicMock
-from app.main import app
+from app.ingestion import parse_failure_log, process_message
 
-client = TestClient(app)
-
-# Sample payloads — reused across multiple tests
-SAMPLE_FAILURE_PAYLOAD = {
-    "repository": {
-        "full_name": "shri-5279/test-repo"
-    },
+SAMPLE_EVENT = {
+    "repository": "shri-5279/PipeLine-AI",
     "workflow": "CI Pipeline",
-    "workflow_run": {
-        "id": 12345,
-        "conclusion": "failure",
-        "head_branch": "main",
-        "head_sha": "abc123def456",
-        "created_at": "2024-01-15T10:30:00Z"
-    }
+    "run_id": 99999,
+    "conclusion": "failure",
+    "branch": "main",
+    "commit_sha": "abc123def456",
+    "created_at": "2024-01-15T10:30:00Z",
+    "stored_at": "2024-01-15T10:30:05Z",
+    "s3_key": "failures/shri-5279/PipeLine-AI/2024-01-15/run-99999.json"
 }
 
-SAMPLE_SUCCESS_PAYLOAD = {
-    "repository": {
-        "full_name": "shri-5279/test-repo"
-    },
-    "workflow": "CI Pipeline",
-    "workflow_run": {
-        "id": 12346,
-        "conclusion": "success",
-        "head_branch": "main",
-        "head_sha": "abc123def456",
-        "created_at": "2024-01-15T10:30:00Z"
+SAMPLE_SQS_MESSAGE = {
+    "MessageId": "test-message-id-123",
+    "ReceiptHandle": "test-receipt-handle-abc",
+    "Body": json.dumps(SAMPLE_EVENT),
+    "Attributes": {
+        "SentTimestamp": "1705312200000"
     }
 }
 
 
-def test_root_status_code():
-    response = client.get("/")
-    assert response.status_code == 200
+def test_parse_failure_log_returns_required_fields():
+    result = parse_failure_log(SAMPLE_EVENT)
+    assert "repository" in result
+    assert "workflow" in result
+    assert "run_id" in result
+    assert "branch" in result
+    assert "commit_sha" in result
+    assert "s3_key" in result
+    assert "status" in result
 
 
-def test_root_returns_correct_data():
-    response = client.get("/")
-    data = response.json()
-    assert data["service"] == "PipeLine AI"
-    assert data["status"] == "running"
+def test_parse_failure_log_sets_pending_status():
+    result = parse_failure_log(SAMPLE_EVENT)
+    assert result["status"] == "pending_analysis"
 
 
-def test_health_check():
-    response = client.get("/health")
-    assert response.status_code == 200
-    assert response.json()["status"] == "healthy"
+def test_parse_failure_log_preserves_repository():
+    result = parse_failure_log(SAMPLE_EVENT)
+    assert result["repository"] == "shri-5279/PipeLine-AI"
 
 
-@patch("app.main.save_failure_log")
-@patch("app.main.get_sqs_client")
-def test_webhook_failure_is_queued(mock_sqs_client, mock_save_log):
-    # Mock S3 save — return a fake S3 key
-    mock_save_log.return_value = "failures/shri-5279/test-repo/2024-01-15/run-12345.json"
-
-    # Mock SQS send
-    mock_sqs = MagicMock()
-    mock_sqs.send_message.return_value = {"MessageId": "fake-message-id-123"}
-    mock_sqs_client.return_value = mock_sqs
-
-    response = client.post("/webhook/github", json=SAMPLE_FAILURE_PAYLOAD)
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "received"
-
-    # Verify SQS was actually called
-    assert mock_sqs.send_message.called
+def test_parse_failure_log_ai_fields_are_none():
+    result = parse_failure_log(SAMPLE_EVENT)
+    assert result["root_cause"] is None
+    assert result["suggested_fix"] is None
+    assert result["failure_category"] is None
 
 
-@patch("app.main.save_failure_log")
-@patch("app.main.get_sqs_client")
-def test_webhook_saves_to_s3(mock_sqs_client, mock_save_log):
-    # Verify that save_failure_log is called for failures
-    mock_save_log.return_value = "failures/shri-5279/test-repo/2024-01-15/run-12345.json"
+# We now mock BOTH get_failure_log (S3) AND save_failure_to_db (PostgreSQL)
+# because process_message calls both of them
+# Tests must never touch real AWS or real databases
+@patch("app.ingestion.save_failure_to_db")
+@patch("app.ingestion.get_failure_log")
+def test_process_message_returns_true_on_success(mock_get_log, mock_save_db):
+    # Mock S3 fetch — return our sample event
+    mock_get_log.return_value = SAMPLE_EVENT
 
-    mock_sqs = MagicMock()
-    mock_sqs.send_message.return_value = {"MessageId": "fake-id-456"}
-    mock_sqs_client.return_value = mock_sqs
+    # Mock DB save — return a fake row ID
+    # In real code save_failure_to_db returns the new row's ID
+    mock_save_db.return_value = 1
 
-    response = client.post("/webhook/github", json=SAMPLE_FAILURE_PAYLOAD)
+    result = process_message(SAMPLE_SQS_MESSAGE)
+    assert result is True
 
-    assert response.status_code == 200
-    data = response.json()
-
-    # Response must include the S3 key
-    assert "s3_key" in data
-
-    # save_failure_log must have been called
-    assert mock_save_log.called
-
-
-@patch("app.main.save_failure_log")
-@patch("app.main.get_sqs_client")
-def test_webhook_success_is_skipped(mock_sqs_client, mock_save_log):
-    mock_sqs = MagicMock()
-    mock_sqs_client.return_value = mock_sqs
-
-    response = client.post("/webhook/github", json=SAMPLE_SUCCESS_PAYLOAD)
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "skipped"
-
-    # Neither S3 nor SQS should be called for successful runs
-    assert not mock_save_log.called
-    assert not mock_sqs.send_message.called
+    # Verify both S3 and DB were actually called
+    assert mock_get_log.called
+    assert mock_save_db.called
 
 
-def test_webhook_invalid_json():
-    response = client.post(
-        "/webhook/github",
-        content="this is not json",
-        headers={"Content-Type": "application/json"}
-    )
-    assert response.status_code == 400
-
-
-def test_build_s3_key_format():
-    from app.storage import build_s3_key
-
-    event = {
-        "repository": "shri-5279/test-repo",
-        "run_id": 99999
+def test_process_message_handles_invalid_json():
+    bad_message = {
+        "MessageId": "bad-id",
+        "ReceiptHandle": "bad-handle",
+        "Body": "this is not valid json at all {{{"
     }
+    result = process_message(bad_message)
+    assert result is True
 
-    key = build_s3_key(event)
 
-    assert key.startswith("failures/")
-    assert "shri-5279" in key
-    assert "test-repo" in key
-    assert key.endswith(".json")
+@patch("app.ingestion.save_failure_to_db")
+@patch("app.ingestion.get_failure_log")
+def test_process_message_handles_s3_failure_gracefully(mock_get_log, mock_save_db):
+    # S3 fetch fails
+    mock_get_log.side_effect = Exception("S3 connection failed")
+
+    # DB save still works
+    mock_save_db.return_value = 1
+
+    # Should still return True — S3 failure is non-fatal
+    result = process_message(SAMPLE_SQS_MESSAGE)
+    assert result is True

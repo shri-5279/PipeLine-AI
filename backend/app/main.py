@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException
 from dotenv import load_dotenv
 from app.storage import save_failure_log
+from app.database import get_recent_failures
 import os
 import boto3
 import json
@@ -44,11 +45,26 @@ def health_check():
     }
 
 
+@app.get("/failures")
+def get_failures():
+    # Returns the 10 most recent failures from PostgreSQL
+    # This is the endpoint the React dashboard will call in Phase 4
+    try:
+        failures = get_recent_failures(limit=10)
+        return {
+            "status": "success",
+            "count": len(failures),
+            "failures": failures
+        }
+    except Exception as e:
+        logger.error(f"Failed to retrieve failures: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve failures")
+
+
 @app.post("/webhook/github")
 async def github_webhook(request: Request):
     try:
         payload = await request.json()
-
         logger.info(f"Received webhook from GitHub")
 
         event_data = {
@@ -68,14 +84,11 @@ async def github_webhook(request: Request):
                 "reason": f"conclusion was {event_data['conclusion']}"
             }
 
-        # Save raw log to S3 first — persist before processing
         s3_key = save_failure_log(event_data)
         logger.info(f"Log saved to S3 at key: {s3_key}")
 
-        # Add S3 key so the processor knows where to find the log
         event_data["s3_key"] = s3_key
 
-        # Push to SQS for async processing
         sqs = get_sqs_client()
         response = sqs.send_message(
             QueueUrl=SQS_QUEUE_URL,
