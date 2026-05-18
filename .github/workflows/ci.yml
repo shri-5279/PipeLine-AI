@@ -1,0 +1,84 @@
+# The name of this workflow — shows up in GitHub Actions tab
+name: PipeLine AI CI
+
+# 'on' defines WHEN this workflow runs
+# We want it to run on every push to main AND on every pull request to main
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+# jobs = the actual work to do
+# A workflow can have multiple jobs that run in parallel
+# We just need one job: running tests
+jobs:
+
+  # 'test' is the name of our job — you can name it anything
+  test:
+    # runs-on = what kind of machine GitHub should use
+    # ubuntu-latest = a fresh Ubuntu Linux virtual machine
+    # GitHub provides this for free for public repos
+    runs-on: ubuntu-latest
+
+    # steps = the individual commands to run, in order
+    steps:
+      # Step 1: Check out your code
+      # 'uses' means "use a pre-built GitHub Action"
+      # actions/checkout@v4 is an official action that clones your repo
+      # onto the GitHub machine so the rest of the steps can access your files
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 2: Install Python
+      # actions/setup-python@v4 installs a specific Python version
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      # Step 3: Cache pip dependencies
+      # This saves your installed packages between runs
+      # So if requirements.txt hasn't changed, pip install is skipped
+      # Makes CI runs much faster after the first one
+      - name: Cache pip packages
+        uses: actions/cache@v3
+        with:
+          # path = where pip stores downloaded packages on this machine
+          path: ~/.cache/pip
+          # key = a unique identifier for this cache
+          # hashFiles('requirements.txt') generates a hash of your requirements file
+          # If requirements.txt changes, the hash changes, cache is invalidated
+          # and pip reinstalls everything fresh
+          key: ${{ runner.os }}-pip-${{ hashFiles('backend/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      # Step 4: Install dependencies
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      # Step 5: Run tests
+      # '-v' = verbose output so you can see each test name in the logs
+      # '--tb=short' = short traceback format when tests fail
+      - name: Run tests
+        run: |
+          cd backend
+          pytest tests/ -v --tb=short
+
+        # env = environment variables available during this step
+        # Our app reads these from .env in development
+        # In CI there's no .env file — we pass them directly as env vars
+        # These are FAKE values — just enough to make the app import without crashing
+        # The real AWS calls are all mocked in tests so fake values are fine
+        env:
+          SQS_QUEUE_URL: https://sqs.us-east-1.amazonaws.com/fake/fake-queue
+          S3_BUCKET_NAME: fake-bucket
+          DATABASE_URL: postgresql://fake:fake@localhost:5432/fake
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: fake-key
+          AWS_SECRET_ACCESS_KEY: fake-secret
+          APP_ENV: test
+          APP_VERSION: 0.1.0
