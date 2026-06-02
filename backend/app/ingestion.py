@@ -5,7 +5,8 @@ import time
 import os
 from dotenv import load_dotenv
 from app.storage import get_failure_log
-from app.database import save_failure_to_db, create_tables
+from app.database import save_failure_to_db, create_tables, update_failure_analysis
+from app.ai_analyzer import analyze_failure
 
 load_dotenv()
 
@@ -67,9 +68,18 @@ def process_message(message: dict) -> bool:
         # Parse the failure data
         parsed_data = parse_failure_log(event_data)
 
-        # Save to PostgreSQL — this replaces the "Would store to DB" log
+        # Save initial record to PostgreSQL
         db_id = save_failure_to_db(parsed_data)
         logger.info(f"Saved to PostgreSQL with id: {db_id}")
+
+        # Run AI analysis
+        logger.info(f"Running AI analysis for run_id: {parsed_data['run_id']}")
+        ai_result = analyze_failure(event_data)
+
+        # Update the database record with AI analysis results
+        update_failure_analysis(db_id, ai_result)
+        logger.info(f"AI analysis saved — category: {ai_result['failure_category']}")
+        logger.info(f"Root cause: {ai_result['root_cause'][:100]}...")
 
         logger.info(f"Successfully processed run_id: {parsed_data['run_id']}")
         return True
@@ -98,8 +108,6 @@ def poll_queue():
     logger.info("Starting PipeLine AI ingestion service...")
     logger.info(f"Polling queue: {SQS_QUEUE_URL}")
 
-    # Create database tables when the service starts
-    # This is safe to run every time — it skips tables that already exist
     logger.info("Initializing database tables...")
     create_tables()
 
@@ -126,7 +134,6 @@ def poll_queue():
 
             for message in messages:
                 success = process_message(message)
-
                 if success:
                     delete_message(sqs, message["ReceiptHandle"])
                 else:

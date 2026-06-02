@@ -18,9 +18,15 @@ SAMPLE_SQS_MESSAGE = {
     "MessageId": "test-message-id-123",
     "ReceiptHandle": "test-receipt-handle-abc",
     "Body": json.dumps(SAMPLE_EVENT),
-    "Attributes": {
-        "SentTimestamp": "1705312200000"
-    }
+    "Attributes": {"SentTimestamp": "1705312200000"}
+}
+
+SAMPLE_AI_RESULT = {
+    "root_cause": "Missing dependency: numpy not found in requirements.txt",
+    "suggested_fix": "Add numpy to requirements.txt and push again",
+    "failure_category": "dependency_error",
+    "confidence": "high",
+    "additional_context": "Check all imports in your Python files"
 }
 
 
@@ -52,39 +58,67 @@ def test_parse_failure_log_ai_fields_are_none():
     assert result["failure_category"] is None
 
 
-# IMPORTANT: the patch path must match WHERE the function is USED
-# not where it is DEFINED
-# save_failure_to_db is defined in app.database
-# but it is IMPORTED AND USED in app.ingestion
-# so we patch it at app.ingestion.save_failure_to_db
-# Same rule applies to get_failure_log
+@patch("app.ingestion.update_failure_analysis")
+@patch("app.ingestion.analyze_failure")
 @patch("app.ingestion.save_failure_to_db")
 @patch("app.ingestion.get_failure_log")
-def test_process_message_returns_true_on_success(mock_get_log, mock_save_db):
+def test_process_message_returns_true_on_success(
+    mock_get_log, mock_save_db, mock_analyze, mock_update
+):
     mock_get_log.return_value = SAMPLE_EVENT
     mock_save_db.return_value = 1
+    mock_analyze.return_value = SAMPLE_AI_RESULT
+    mock_update.return_value = None
 
     result = process_message(SAMPLE_SQS_MESSAGE)
     assert result is True
-    assert mock_get_log.called
     assert mock_save_db.called
+    assert mock_analyze.called
+    assert mock_update.called
 
 
 def test_process_message_handles_invalid_json():
     bad_message = {
         "MessageId": "bad-id",
         "ReceiptHandle": "bad-handle",
-        "Body": "this is not valid json at all {{{"
+        "Body": "this is not valid json {{{"
     }
     result = process_message(bad_message)
     assert result is True
 
 
+@patch("app.ingestion.update_failure_analysis")
+@patch("app.ingestion.analyze_failure")
 @patch("app.ingestion.save_failure_to_db")
 @patch("app.ingestion.get_failure_log")
-def test_process_message_handles_s3_failure_gracefully(mock_get_log, mock_save_db):
+def test_process_message_handles_s3_failure_gracefully(
+    mock_get_log, mock_save_db, mock_analyze, mock_update
+):
     mock_get_log.side_effect = Exception("S3 connection failed")
     mock_save_db.return_value = 1
+    mock_analyze.return_value = SAMPLE_AI_RESULT
+    mock_update.return_value = None
 
     result = process_message(SAMPLE_SQS_MESSAGE)
     assert result is True
+
+
+@patch("app.ingestion.update_failure_analysis")
+@patch("app.ingestion.analyze_failure")
+@patch("app.ingestion.save_failure_to_db")
+@patch("app.ingestion.get_failure_log")
+def test_ai_analysis_is_called_and_saved(
+    mock_get_log, mock_save_db, mock_analyze, mock_update
+):
+    mock_get_log.return_value = SAMPLE_EVENT
+    mock_save_db.return_value = 42
+    mock_analyze.return_value = SAMPLE_AI_RESULT
+    mock_update.return_value = None
+
+    process_message(SAMPLE_SQS_MESSAGE)
+
+    # Verify analyze_failure was called with the event data
+    assert mock_analyze.called
+
+    # Verify update was called with the correct db_id
+    mock_update.assert_called_once_with(42, SAMPLE_AI_RESULT)

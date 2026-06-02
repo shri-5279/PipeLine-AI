@@ -2,26 +2,13 @@ import logging
 import os
 from datetime import datetime
 from dotenv import load_dotenv
-from sqlalchemy import (
-    create_engine,
-    Column,
-    Integer,
-    String,
-    DateTime,
-    Text,
-)
-
-# THIS is the modern way to use declarative_base in SQLAlchemy 2.0
-# The old way (declarative_base from ext.declarative) still works
-# but throws a deprecation warning — this fixes that warning
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
-
 DATABASE_URL = os.getenv("DATABASE_URL", "")
-
 Base = declarative_base()
 
 
@@ -39,9 +26,12 @@ class PipelineFailure(Base):
     root_cause = Column(Text, nullable=True)
     suggested_fix = Column(Text, nullable=True)
     failure_category = Column(String(100), nullable=True, index=True)
+    confidence = Column(String(20), nullable=True)
+    additional_context = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=True)
     stored_at = Column(DateTime, nullable=True)
     processed_at = Column(DateTime, default=datetime.utcnow)
+    analyzed_at = Column(DateTime, nullable=True)
 
     def to_dict(self):
         return {
@@ -56,27 +46,22 @@ class PipelineFailure(Base):
             "root_cause": self.root_cause,
             "suggested_fix": self.suggested_fix,
             "failure_category": self.failure_category,
+            "confidence": self.confidence,
+            "additional_context": self.additional_context,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "stored_at": self.stored_at.isoformat() if self.stored_at else None,
             "processed_at": self.processed_at.isoformat() if self.processed_at else None,
+            "analyzed_at": self.analyzed_at.isoformat() if self.analyzed_at else None,
         }
 
 
 def get_engine():
-    # THIS is the key fix — we create the engine LAZILY
-    # meaning only when a function actually needs it
-    # NOT at import time
-    # Before: engine = create_engine(DATABASE_URL) ran at the top of the file
-    # the moment ANY file imported database.py, it tried to connect to postgres
-    # Now: engine is only created when get_engine() is actually called
-    # During tests, the mock intercepts before get_engine() is ever reached
     if not DATABASE_URL:
         raise ValueError("DATABASE_URL environment variable is not set")
     return create_engine(DATABASE_URL, echo=False)
 
 
 def get_session():
-    # Creates a new database session using the lazy engine
     engine = get_engine()
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     return SessionLocal()
@@ -94,7 +79,6 @@ def create_tables():
 
 def save_failure_to_db(parsed_data: dict) -> int:
     session = get_session()
-
     try:
         def parse_dt(dt_string):
             if not dt_string or dt_string == "unknown":
@@ -125,7 +109,6 @@ def save_failure_to_db(parsed_data: dict) -> int:
         session.add(failure)
         session.commit()
         session.refresh(failure)
-
         logger.info(f"Saved failure to DB with id: {failure.id}")
         return failure.id
 
@@ -133,7 +116,40 @@ def save_failure_to_db(parsed_data: dict) -> int:
         session.rollback()
         logger.error(f"Failed to save failure to DB: {str(e)}")
         raise
+    finally:
+        session.close()
 
+
+def update_failure_analysis(failure_id: int, ai_result: dict):
+    # Updates an existing failure record with AI analysis results
+    # Called after analyze_failure() returns results
+    session = get_session()
+    try:
+        # Query the existing record by ID
+        failure = session.query(PipelineFailure).filter(
+            PipelineFailure.id == failure_id
+        ).first()
+
+        if not failure:
+            logger.error(f"No failure found with id: {failure_id}")
+            return
+
+        # Update the AI fields
+        failure.root_cause = ai_result.get("root_cause")
+        failure.suggested_fix = ai_result.get("suggested_fix")
+        failure.failure_category = ai_result.get("failure_category")
+        failure.confidence = ai_result.get("confidence")
+        failure.additional_context = ai_result.get("additional_context")
+        failure.status = "analyzed"
+        failure.analyzed_at = datetime.utcnow()
+
+        session.commit()
+        logger.info(f"Updated failure {failure_id} with AI analysis")
+
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Failed to update failure analysis: {str(e)}")
+        raise
     finally:
         session.close()
 
@@ -146,10 +162,8 @@ def get_recent_failures(limit: int = 10) -> list:
             .limit(limit)\
             .all()
         return [f.to_dict() for f in failures]
-
     except Exception as e:
         logger.error(f"Failed to retrieve failures: {str(e)}")
         return []
-
     finally:
         session.close()

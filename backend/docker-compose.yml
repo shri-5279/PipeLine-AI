@@ -1,56 +1,49 @@
-# version specifies the Docker Compose file format version
-version: "3.8"
-
-# services = the containers we want to run
 services:
 
-  # First service — the FastAPI API server
+  db:
+    image: postgres:15
+    container_name: pipeline-ai-db
+    environment:
+      POSTGRES_USER: pipelineai
+      POSTGRES_PASSWORD: PipelineAI2024!
+      POSTGRES_DB: pipelineai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pipelineai -d pipelineai"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   api:
-    # build tells Docker Compose to BUILD an image from a Dockerfile
-    # context: . means "use the current directory as the build context"
-    # dockerfile: Dockerfile means "use the file named Dockerfile"
     build:
       context: .
       dockerfile: Dockerfile
-
-    # Container name — makes it easier to identify in Docker Desktop
     container_name: pipeline-ai-api
-
-    # ports maps host port to container port
-    # "8000:8000" means:
-    #   left side = port on YOUR Mac
-    #   right side = port inside the container
-    # So visiting localhost:8000 on your Mac reaches port 8000 in the container
     ports:
       - "8000:8000"
-
-    # env_file loads environment variables from a file
-    # This is how secrets reach the container WITHOUT being baked into the image
-    # The .env file stays on your machine — never inside the container image
     env_file:
       - .env
-
-    # restart policy — what to do if the container crashes
-    # "unless-stopped" = always restart unless you manually stopped it
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
 
-  # Second service — the ingestion worker
   ingestion:
     build:
       context: .
       dockerfile: Dockerfile.ingestion
-
     container_name: pipeline-ai-ingestion
-
-    # No ports — this is a worker, not a server
-    # It reaches out to SQS, nothing reaches in to it
-
     env_file:
       - .env
-
-    # depends_on means "start api first, then start ingestion"
-    # Useful when one service needs another to be ready first
     depends_on:
-      - api
-
+      db:
+        condition: service_healthy
+      api:
+        condition: service_started
     restart: unless-stopped
+
+volumes:
+  postgres_data:
