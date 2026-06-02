@@ -20,7 +20,7 @@ SAMPLE_AI_RESPONSE = {
 }
 
 
-@patch("app.ai_analyzer.get_bedrock_client")
+@patch("app.ai_analyzer.get_groq_client")
 def test_analyze_failure_returns_required_fields(mock_bedrock_client):
     # Mock the Bedrock client
     mock_client = MagicMock()
@@ -43,7 +43,7 @@ def test_analyze_failure_returns_required_fields(mock_bedrock_client):
     assert "confidence" in result
 
 
-@patch("app.ai_analyzer.get_bedrock_client")
+@patch("app.ai_analyzer.get_groq_client")
 def test_analyze_failure_returns_correct_category(mock_bedrock_client):
     mock_client = MagicMock()
     mock_bedrock_client.return_value = mock_client
@@ -60,7 +60,7 @@ def test_analyze_failure_returns_correct_category(mock_bedrock_client):
     assert result["confidence"] == "high"
 
 
-@patch("app.ai_analyzer.get_bedrock_client")
+@patch("app.ai_analyzer.get_groq_client")
 def test_analyze_failure_handles_bedrock_error_gracefully(mock_bedrock_client):
     # If Bedrock is unavailable, should return a safe fallback
     mock_client = MagicMock()
@@ -76,7 +76,7 @@ def test_analyze_failure_handles_bedrock_error_gracefully(mock_bedrock_client):
     assert result["confidence"] == "low"
 
 
-@patch("app.ai_analyzer.get_bedrock_client")
+@patch("app.ai_analyzer.get_groq_client")
 def test_analyze_failure_handles_invalid_json_response(mock_bedrock_client):
     # If Claude returns non-JSON, should handle gracefully
     mock_client = MagicMock()
