@@ -2,7 +2,7 @@
 
 ![CI](https://github.com/shri-5279/PipeLine-AI/actions/workflows/ci.yml/badge.svg)
 
-> AI-powered CI/CD failure analysis — turns 40-minute debug sessions into 30-second answers.
+> AI-powered CI/CD failure analysis -> turns 40-minute debug sessions into 30-second answers.
 
 ## What it does
 When a CI pipeline fails, PipeLine AI automatically reads the failure log,
