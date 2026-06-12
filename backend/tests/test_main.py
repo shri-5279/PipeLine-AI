@@ -220,3 +220,44 @@ def test_process_message_handles_s3_failure_gracefully(
 
     result = process_message(SAMPLE_SQS_MESSAGE)
     assert result is True
+
+
+
+@patch("app.main.run_agent")
+@patch("app.main.get_session")
+def test_agent_analysis_endpoint(mock_get_session, mock_run_agent):
+    # Mock the database lookup
+    mock_session = MagicMock()
+    mock_get_session.return_value = mock_session
+
+    mock_failure = MagicMock()
+    mock_failure.to_dict.return_value = {
+        "id": 1,
+        "repository": "shri-5279/PipeLine-AI",
+        "status": "analyzed",
+        "root_cause": "Missing dependency"
+    }
+    mock_session.query.return_value.filter.return_value.first.return_value = mock_failure
+
+    # Mock the agent result
+    mock_run_agent.return_value = {
+        "agent_output": "Update requirements.txt with missing package",
+        "status": "completed"
+    }
+
+    response = client.post("/failures/1/analyze")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    assert "agent_analysis" in data
+
+
+@patch("app.main.get_session")
+def test_agent_analysis_404_for_missing_failure(mock_get_session):
+    mock_session = MagicMock()
+    mock_get_session.return_value = mock_session
+    mock_session.query.return_value.filter.return_value.first.return_value = None
+
+    response = client.post("/failures/999/analyze")
+    assert response.status_code == 404

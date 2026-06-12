@@ -1,7 +1,8 @@
 from fastapi import FastAPI, Request, HTTPException
 from dotenv import load_dotenv
 from app.storage import save_failure_log
-from app.database import get_recent_failures
+from app.database import get_recent_failures, get_session, PipelineFailure
+from app.agent import run_agent
 import os
 import boto3
 import json
@@ -47,8 +48,6 @@ def health_check():
 
 @app.get("/failures")
 def get_failures():
-    # Returns the 10 most recent failures from PostgreSQL
-    # This is the endpoint the React dashboard will call in Phase 4
     try:
         failures = get_recent_failures(limit=10)
         return {
@@ -59,6 +58,42 @@ def get_failures():
     except Exception as e:
         logger.error(f"Failed to retrieve failures: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to retrieve failures")
+
+
+@app.post("/failures/{failure_id}/analyze")
+def run_agent_analysis(failure_id: int):
+    # This endpoint triggers the full LangChain agent for a specific failure
+    # The agent searches past failures and GitHub Issues autonomously
+    # This is the human-in-the-loop trigger — a human decides when to run the agent
+    try:
+        session = get_session()
+        failure = session.query(PipelineFailure).filter(
+            PipelineFailure.id == failure_id
+        ).first()
+        session.close()
+
+        if not failure:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Failure {failure_id} not found"
+            )
+
+        # Run the agent with the failure data
+        logger.info(f"Running agent analysis for failure_id: {failure_id}")
+        agent_result = run_agent(failure.to_dict())
+
+        return {
+            "status": "success",
+            "failure_id": failure_id,
+            "agent_analysis": agent_result["agent_output"],
+            "agent_status": agent_result["status"]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Agent analysis failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/webhook/github")
