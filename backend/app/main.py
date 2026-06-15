@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from app.storage import save_failure_log
 from app.database import get_recent_failures, get_session, PipelineFailure
@@ -17,6 +18,14 @@ app = FastAPI(
     title="PipeLine AI",
     description="AI-powered CI/CD failure analysis",
     version="0.1.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL", "")
@@ -62,9 +71,6 @@ def get_failures():
 
 @app.post("/failures/{failure_id}/analyze")
 def run_agent_analysis(failure_id: int):
-    # This endpoint triggers the full LangChain agent for a specific failure
-    # The agent searches past failures and GitHub Issues autonomously
-    # This is the human-in-the-loop trigger — a human decides when to run the agent
     try:
         session = get_session()
         failure = session.query(PipelineFailure).filter(
@@ -78,7 +84,6 @@ def run_agent_analysis(failure_id: int):
                 detail=f"Failure {failure_id} not found"
             )
 
-        # Run the agent with the failure data
         logger.info(f"Running agent analysis for failure_id: {failure_id}")
         agent_result = run_agent(failure.to_dict())
 
