@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
 
-// The API URL — your FastAPI backend
 const API_URL = 'http://localhost:8000';
 
-// Status badge colors based on failure category
 const CATEGORY_COLORS = {
   dependency_error: '#e74c3c',
   test_failure: '#e67e22',
@@ -16,16 +14,83 @@ const CATEGORY_COLORS = {
   unknown: '#7f8c8d'
 };
 
-// Confidence badge colors
 const CONFIDENCE_COLORS = {
   high: '#27ae60',
   medium: '#f39c12',
   low: '#e74c3c'
 };
 
-function FailureCard({ failure, onAnalyze }) {
+function formatAgentAnalysis(text) {
+  if (!text) return [];
+
+  // Split on numbered steps like "1.", "2.", etc or newlines
+  // This turns a wall of text into clean readable steps
+  const lines = text
+    .replace(/\\n/g, '\n')
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l.length > 0);
+
+  // Group into numbered steps and regular sentences
+  const steps = [];
+  let currentStep = null;
+
+  lines.forEach(line => {
+    // Matches "1." or "1)" at start of line
+    const stepMatch = line.match(/^(\d+)[.)]\s+(.+)/);
+    if (stepMatch) {
+      if (currentStep) steps.push(currentStep);
+      currentStep = { type: 'step', number: stepMatch[1], text: stepMatch[2] };
+    } else if (line.startsWith('Additionally') || line.startsWith('Note') || line.startsWith('If')) {
+      if (currentStep) { steps.push(currentStep); currentStep = null; }
+      steps.push({ type: 'note', text: line });
+    } else {
+      if (currentStep) {
+        currentStep.text += ' ' + line;
+      } else {
+        steps.push({ type: 'paragraph', text: line });
+      }
+    }
+  });
+
+  if (currentStep) steps.push(currentStep);
+  return steps;
+}
+
+function AgentAnalysisDisplay({ text }) {
+  const parts = formatAgentAnalysis(text);
+
+  return (
+    <div className="agent-analysis-content">
+      {parts.map((part, i) => {
+        if (part.type === 'step') {
+          return (
+            <div key={i} className="agent-step">
+              <span className="step-number">{part.number}</span>
+              <span className="step-text">{part.text}</span>
+            </div>
+          );
+        }
+        if (part.type === 'note') {
+          return (
+            <div key={i} className="agent-note">
+              <span className="note-icon">💡</span>
+              <span>{part.text}</span>
+            </div>
+          );
+        }
+        return (
+          <p key={i} className="agent-paragraph">{part.text}</p>
+        );
+      })}
+    </div>
+  );
+}
+
+function FailureCard({ failure }) {
   const [analyzing, setAnalyzing] = useState(false);
   const [agentResult, setAgentResult] = useState(null);
+  const [expanded, setExpanded] = useState(true);
 
   const handleAnalyze = async () => {
     setAnalyzing(true);
@@ -44,8 +109,9 @@ function FailureCard({ failure, onAnalyze }) {
 
   return (
     <div className="failure-card">
-      <div className="card-header">
+      <div className="card-header" onClick={() => setExpanded(!expanded)}>
         <div className="card-title">
+          <span className="expand-icon">{expanded ? '▾' : '▸'}</span>
           <span className="repo-name">{failure.repository}</span>
           <span
             className="category-badge"
@@ -72,67 +138,71 @@ function FailureCard({ failure, onAnalyze }) {
         </div>
       </div>
 
-      <div className="card-body">
-        {failure.root_cause && (
-          <div className="analysis-section">
-            <div className="section-label">
-              Root Cause
-              {failure.confidence && (
-                <span
-                  className="confidence-badge"
-                  style={{
-                    backgroundColor:
-                      CONFIDENCE_COLORS[failure.confidence] || '#7f8c8d'
-                  }}
-                >
-                  {failure.confidence} confidence
-                </span>
-              )}
+      {expanded && (
+        <div className="card-body">
+          {failure.root_cause && (
+            <div className="analysis-section">
+              <div className="section-label">
+                Root Cause
+                {failure.confidence && (
+                  <span
+                    className="confidence-badge"
+                    style={{
+                      backgroundColor:
+                        CONFIDENCE_COLORS[failure.confidence] || '#7f8c8d'
+                    }}
+                  >
+                    {failure.confidence} confidence
+                  </span>
+                )}
+              </div>
+              <p className="section-content">{failure.root_cause}</p>
             </div>
-            <p className="section-content">{failure.root_cause}</p>
-          </div>
-        )}
+          )}
 
-        {failure.suggested_fix && (
-          <div className="analysis-section">
-            <div className="section-label">Suggested Fix</div>
-            <p className="section-content">{failure.suggested_fix}</p>
-          </div>
-        )}
+          {failure.suggested_fix && (
+            <div className="analysis-section">
+              <div className="section-label">Suggested Fix</div>
+              <p className="section-content">{failure.suggested_fix}</p>
+            </div>
+          )}
 
-        {failure.additional_context && (
-          <div className="analysis-section">
-            <div className="section-label">Additional Context</div>
-            <p className="section-content">{failure.additional_context}</p>
-          </div>
-        )}
+          {failure.additional_context && (
+            <div className="analysis-section">
+              <div className="section-label">Additional Context</div>
+              <p className="section-content">{failure.additional_context}</p>
+            </div>
+          )}
 
-        <div className="card-footer">
-          <div className="timestamps">
-            <span>
+          <div className="card-footer">
+            <div className="timestamps">
               Processed:{' '}
               {failure.processed_at
                 ? new Date(failure.processed_at).toLocaleString()
                 : 'N/A'}
-            </span>
+            </div>
+            <button
+              className="analyze-btn"
+              onClick={handleAnalyze}
+              disabled={analyzing}
+            >
+              {analyzing ? '⟳ Agent Analyzing...' : '⚡ Run Agent Analysis'}
+            </button>
           </div>
 
-          <button
-            className="analyze-btn"
-            onClick={handleAnalyze}
-            disabled={analyzing}
-          >
-            {analyzing ? 'Agent Analyzing...' : 'Run Agent Analysis'}
-          </button>
+          {agentResult && (
+            <div className="agent-result">
+              <div className="agent-result-header">
+                <span className="agent-icon">🤖</span>
+                <span className="section-label" style={{ margin: 0 }}>
+                  Agent Analysis
+                </span>
+              </div>
+              <AgentAnalysisDisplay text={agentResult} />
+            </div>
+          )}
         </div>
-
-        {agentResult && (
-          <div className="agent-result">
-            <div className="section-label">Agent Analysis</div>
-            <p className="section-content">{agentResult}</p>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }
@@ -156,16 +226,23 @@ function StatsBar({ failures }) {
         <div className="stat-label">Total Failures</div>
       </div>
       <div className="stat">
-        <div className="stat-number">{analyzed}</div>
+        <div className="stat-number" style={{ color: '#27ae60' }}>
+          {analyzed}
+        </div>
         <div className="stat-label">Analyzed</div>
       </div>
       <div className="stat">
-        <div className="stat-number">{total - analyzed}</div>
+        <div
+          className="stat-number"
+          style={{ color: total - analyzed > 0 ? '#f39c12' : '#27ae60' }}
+        >
+          {total - analyzed}
+        </div>
         <div className="stat-label">Pending</div>
       </div>
       <div className="stat">
-        <div className="stat-number">
-          {topCategory ? topCategory[0].replace('_', ' ') : 'N/A'}
+        <div className="stat-number" style={{ fontSize: '16px', textTransform: 'capitalize' }}>
+          {topCategory ? topCategory[0].replace(/_/g, ' ') : 'N/A'}
         </div>
         <div className="stat-label">Top Failure Type</div>
       </div>
@@ -182,7 +259,7 @@ function App() {
   const fetchFailures = async () => {
     try {
       const response = await fetch(`${API_URL}/failures`);
-      if (!response.ok) throw new Error('Failed to fetch failures');
+      if (!response.ok) throw new Error('Failed to fetch');
       const data = await response.json();
       setFailures(data.failures || []);
       setLastRefresh(new Date());
@@ -193,7 +270,6 @@ function App() {
     setLoading(false);
   };
 
-  // Fetch on mount and every 30 seconds
   useEffect(() => {
     fetchFailures();
     const interval = setInterval(fetchFailures, 30000);
@@ -222,13 +298,9 @@ function App() {
       </header>
 
       <main className="app-main">
-        {loading && (
-          <div className="loading">Loading failures...</div>
-        )}
+        {loading && <div className="loading">Loading failures...</div>}
 
-        {error && (
-          <div className="error-banner">{error}</div>
-        )}
+        {error && <div className="error-banner">{error}</div>}
 
         {!loading && !error && (
           <>
@@ -252,10 +324,7 @@ function App() {
             ) : (
               <div className="failures-grid">
                 {failures.map(failure => (
-                  <FailureCard
-                    key={failure.id}
-                    failure={failure}
-                  />
+                  <FailureCard key={failure.id} failure={failure} />
                 ))}
               </div>
             )}
