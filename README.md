@@ -30,40 +30,36 @@ Zero manual log reading. Zero guessing. 30 seconds.
 ---
 
 ## 🏗️ Architecture
+
+```
 GitHub Actions
-│
-▼ POST /webhook/github
+      │
+      ▼ POST /webhook/github
 ┌─────────────────┐
 │   FastAPI API   │ ──── Save raw log ────▶ AWS S3
 │   (port 8000)   │ ──── Queue event  ────▶ AWS SQS
 └─────────────────┘
-│
-▼
+         │
+         ▼
 ┌───────────────────────┐
-│   Ingestion Worker     │
-│   (polls SQS queue)    │
+│   Ingestion Worker    │
+│   (polls SQS queue)   │
 └───────────────────────┘
-│
-┌───────────┴────────────┐
-▼                        ▼
-PostgreSQL DB             Groq LLM
-(structured            (root cause +
-failure data)          suggested fix)
-│
-▼
+         │
+   ┌─────┴──────┐
+   ▼            ▼
+PostgreSQL    Groq LLM
+   │
+   ▼
 ┌──────────────────────┐
-│     AI Agent          │
-│  Tool 1: Search past  │──▶ PostgreSQL
-│         failures      │
-│  Tool 2: Search       │──▶ GitHub Issues API
-│         GitHub Issues │
+│      AI Agent        │
+│  Tool 1: Past fails  │──▶ PostgreSQL
+│  Tool 2: GitHub      │──▶ GitHub Issues API
 └──────────────────────┘
-│
-▼
-React Dashboard
-(failure cards, stats,
-agent trigger on demand)
-
+         │
+         ▼
+   React Dashboard
+```
 ---
 
 ## 🧠 The Agentic AI Layer
@@ -150,23 +146,26 @@ curl -X POST http://localhost:8000/webhook/github \
 ---
 
 ## 📁 Project Structure
+
+```
 PipeLine-AI/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py          # FastAPI routes + webhook handler
-│   │   ├── ingestion.py     # SQS polling worker
-│   │   ├── ai_analyzer.py   # LLM analysis via Groq
-│   │   ├── agent.py         # Agentic AI with tool use
-│   │   ├── database.py      # PostgreSQL models + queries
-│   │   └── storage.py       # S3 log storage
-│   ├── tests/               # pytest test suite (29 tests)
+│   │   ├── main.py
+│   │   ├── ingestion.py
+│   │   ├── ai_analyzer.py
+│   │   ├── agent.py
+│   │   ├── database.py
+│   │   └── storage.py
+│   ├── tests/
 │   ├── Dockerfile
 │   ├── Dockerfile.ingestion
 │   └── docker-compose.yml
 └── frontend/
-└── src/
-├── App.js           # React dashboard
-└── App.css
+    └── src/
+        ├── App.js
+        └── App.css
+```
 
 ---
 
